@@ -61,14 +61,3 @@ public class BotAppetitoBot extends TelegramLongPollingBot {
             }
         }
     }
-
-    @Override
-    public String getBotUsername() {
-        return "BotAppetito"; // Inserisci il nome utente del tuo bot (senza @)
-    }
-
-    @Override
-    public String getBotToken() {
-        return "7440757079:AAHDHBH_nya3e0MPeRQAwaS5gaqvJmg4yZo"; // Inserisci il token che hai ottenuto da BotFather
-    }
-}
