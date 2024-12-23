@@ -1,13 +1,16 @@
 import java.sql.*;
+import java.util.List;
 
 public class Database {
+    private static final String URL = "jdbc:mysql://localhost:3306/botappetito";
+    private static final String USER = "root";
+    private static final String PASSWORD = "";
+
     static Connection connection;
 
-    // Costruttore per inizializzare la connessione
     public Database() {
-        String percorso = "jdbc:mysql://localhost:3306/botappetito";
         try {
-            connection = DriverManager.getConnection(percorso, "root", "");
+            connection = DriverManager.getConnection(URL, USER, PASSWORD);
             if (connection != null) {
                 System.out.println("Connessione avvenuta con successo");
             }
@@ -16,7 +19,6 @@ public class Database {
         }
     }
 
-    // Metodo per chiudere la connessione
     public static void closeConnection() {
         try {
             if (connection != null) {
@@ -29,12 +31,11 @@ public class Database {
     }
 
     // Metodo per inserire una nuova ricetta nel database
-    public void inserisciRicetta(String titolo, String procedimento, String tempo, String link,
-                                 String[] nomiIngredienti, String[] quantitaIngredienti) {
+    public void inserisciRicetta(String titolo, String procedimento, String tempo, String link, String immagine,List<String> nomiIngredienti) {
         String queryRicetta = "INSERT INTO ricette (titolo, procedimento, tempo_preparazione, link_originale) VALUES (?, ?, ?, ?)";
 
         try (PreparedStatement stmtRicetta = connection.prepareStatement(queryRicetta, Statement.RETURN_GENERATED_KEYS)) {
-            // Inserisce la nuova ricetta
+            // Inserisci la nuova ricetta senza immagine
             stmtRicetta.setString(1, titolo);
             stmtRicetta.setString(2, procedimento);
             stmtRicetta.setString(3, tempo);
@@ -46,10 +47,20 @@ public class Database {
             if (generatedKeys.next()) {
                 int ricettaId = generatedKeys.getInt(1);
 
-                // Aggiungiamo gli ingredienti alla tabella ingredienti e alla tabella ricetta_ingredienti
-                for (int i = 0; i < nomiIngredienti.length; i++) {
-                    int ingredienteId = inserisciIngrediente(nomiIngredienti[i]); // Inserisce o recupera l'ID dell'ingrediente
-                    inserisciRelazioneRicettaIngrediente(ricettaId, ingredienteId, quantitaIngredienti[i]);
+                // Aggiorna la ricetta con l'immagine (se disponibile)
+                if (immagine != null && !immagine.isEmpty()) {
+                    String queryUpdate = "UPDATE ricette SET immagine = ? WHERE id = ?";
+                    try (PreparedStatement stmtUpdate = connection.prepareStatement(queryUpdate)) {
+                        stmtUpdate.setString(1, immagine);
+                        stmtUpdate.setInt(2, ricettaId);
+                        stmtUpdate.executeUpdate();
+                    }
+                }
+
+                // Aggiungi gli ingredienti alla tabella ingredienti e alla tabella ricetta_ingredienti
+                for (String nomeIngrediente : nomiIngredienti) {
+                    int ingredienteId = inserisciIngrediente(nomeIngrediente);
+                    inserisciRelazioneRicettaIngrediente(ricettaId, ingredienteId, "q.b.");
                 }
             }
             System.out.println("Ricetta inserita con successo.");
@@ -58,7 +69,7 @@ public class Database {
         }
     }
 
-    // Metodo per aggiungere un nuovo ingrediente o recuperare il suo ID
+
     private int inserisciIngrediente(String nomeIngrediente) {
         String querySelect = "SELECT id FROM ingredienti WHERE nome = ?";
         String queryInsert = "INSERT INTO ingredienti (nome) VALUES (?)";
@@ -66,24 +77,23 @@ public class Database {
             stmtSelect.setString(1, nomeIngrediente);
             ResultSet resultSet = stmtSelect.executeQuery();
             if (resultSet.next()) {
-                return resultSet.getInt("id"); // L'ingrediente esiste già, restituiamo il suo ID
+                return resultSet.getInt("id");
             } else {
                 try (PreparedStatement stmtInsert = connection.prepareStatement(queryInsert, Statement.RETURN_GENERATED_KEYS)) {
                     stmtInsert.setString(1, nomeIngrediente);
                     stmtInsert.executeUpdate();
                     ResultSet generatedKeys = stmtInsert.getGeneratedKeys();
                     if (generatedKeys.next()) {
-                        return generatedKeys.getInt(1); // Restituiamo l'ID dell'ingrediente appena creato
+                        return generatedKeys.getInt(1);
                     }
                 }
             }
         } catch (SQLException e) {
             System.err.println("Errore nell'inserimento dell'ingrediente: " + e.getMessage());
         }
-        return -1; // Errore, ID non trovato
+        return -1;
     }
 
-    // Metodo per inserire una relazione nella tabella ricetta_ingredienti
     private void inserisciRelazioneRicettaIngrediente(int ricettaId, int ingredienteId, String quantita) {
         String query = "INSERT INTO ricetta_ingredienti (ricetta_id, ingrediente_id, quantita) VALUES (?, ?, ?)";
         try (PreparedStatement stmt = connection.prepareStatement(query)) {
@@ -96,53 +106,42 @@ public class Database {
         }
     }
 
-    // Metodo per ottenere le ricette preferite di un utente
-    public String getRicettePreferite(String userId) {
-        StringBuilder result = new StringBuilder();
-        String query = "SELECT r.titolo, i.nome, ri.quantita FROM ricette r " +
-                "JOIN preferiti p ON r.id = p.ricetta_id " +
-                "JOIN ricetta_ingredienti ri ON r.id = ri.ricetta_id " +
-                "JOIN ingredienti i ON ri.ingrediente_id = i.id " +
-                "WHERE p.user_id = ? ORDER BY r.titolo";
+    public void cancellaTuttiIDati() {
+        String deleteRicettaIngrediente = "DELETE FROM ricetta_ingredienti";
+        String deletePreferiti = "DELETE FROM preferiti";
+        String deleteRicette = "DELETE FROM ricette";
+        String deleteIngredienti = "DELETE FROM ingredienti";
 
-        try (PreparedStatement stmt = connection.prepareStatement(query)) {
-            stmt.setString(1, userId);
-            try (ResultSet resultSet = stmt.executeQuery()) {
-                while (resultSet.next()) {
-                    result.append("Titolo: ").append(resultSet.getString("titolo")).append("\n")
-                            .append("- Ingrediente: ").append(resultSet.getString("nome"))
-                            .append(" (Quantità: ").append(resultSet.getString("quantita")).append(")\n\n");
-                }
-            }
-        } catch (SQLException e) {
-            System.err.println("Errore nel recupero delle ricette preferite: " + e.getMessage());
-        }
-        return result.toString();
-    }
+        try (Statement stmt = connection.createStatement()) {
+            // Cancella tutti i dati dalle tabelle
+            stmt.executeUpdate(deleteRicettaIngrediente);
+            stmt.executeUpdate(deletePreferiti);
+            stmt.executeUpdate(deleteRicette);
+            stmt.executeUpdate(deleteIngredienti);
 
-    // Metodo per aggiungere una ricetta ai preferiti di un utente
-    public void aggiungiPreferito(String userId, int ricettaId) {
-        String query = "INSERT INTO preferiti (user_id, ricetta_id) VALUES (?, ?)";
-        try (PreparedStatement stmt = connection.prepareStatement(query)) {
-            stmt.setString(1, userId);
-            stmt.setInt(2, ricettaId);
-            stmt.executeUpdate();
-            System.out.println("Ricetta aggiunta ai preferiti.");
+            System.out.println("Dati cancellati con successo.");
         } catch (SQLException e) {
-            System.err.println("Errore nell'aggiungere la ricetta ai preferiti: " + e.getMessage());
+            System.err.println("Errore nella cancellazione dei dati: " + e.getMessage());
         }
     }
 
-    // Metodo per rimuovere una ricetta dai preferiti di un utente
-    public void rimuoviPreferito(String userId, int ricettaId) {
-        String query = "DELETE FROM preferiti WHERE user_id = ? AND ricetta_id = ?";
-        try (PreparedStatement stmt = connection.prepareStatement(query)) {
-            stmt.setString(1, userId);
-            stmt.setInt(2, ricettaId);
-            stmt.executeUpdate();
-            System.out.println("Ricetta rimossa dai preferiti.");
+    public void resetAutoIncrement() {
+        String resetAutoIncrementRicette = "ALTER TABLE ricette AUTO_INCREMENT = 1";
+        String resetAutoIncrementIngredienti = "ALTER TABLE ingredienti AUTO_INCREMENT = 1";
+        String resetAutoIncrementRicettaIngrediente = "ALTER TABLE ricetta_ingredienti AUTO_INCREMENT = 1";
+        String resetAutoIncrementPreferiti = "ALTER TABLE preferiti AUTO_INCREMENT = 1";
+
+        try (Statement stmt = connection.createStatement()) {
+            // Reset dei contatori
+            stmt.executeUpdate(resetAutoIncrementRicette);
+            stmt.executeUpdate(resetAutoIncrementIngredienti);
+            stmt.executeUpdate(resetAutoIncrementRicettaIngrediente);
+            stmt.executeUpdate(resetAutoIncrementPreferiti);
+
+            System.out.println("Contatori auto-increment resettati.");
         } catch (SQLException e) {
-            System.err.println("Errore nella rimozione della ricetta dai preferiti: " + e.getMessage());
+            System.err.println("Errore nel reset dell'auto-increment: " + e.getMessage());
         }
     }
+
 }
